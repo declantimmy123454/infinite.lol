@@ -993,7 +993,7 @@ function lazy(_, propertyKey, descriptor) {
     return descriptor;
 }
 /** Scaffold class. */
-var NativeStruct = class NativeStruct {
+class NativeStruct {
     handle;
     constructor(handleOrWrapper) {
         if (handleOrWrapper instanceof NativePointer) {
@@ -1308,7 +1308,17 @@ var Il2Cpp;
         // initialization is not completed yet.
         if (Il2Cpp.exports.getCorlib().isNull()) {
             return await new Promise(resolve => {
+                const timeout = setTimeout(() => {
+                    if (!Il2Cpp.exports.getCorlib().isNull()) {
+                        warn(`resuming execution despite IL2CPP initialization not being captured in time, please open an issue as this is suboptimal`);
+                        interceptor.detach();
+                        resolve(false);
+                    }
+                }, 1000);
                 const interceptor = Interceptor.attach(Il2Cpp.exports.initialize, {
+                    onEnter() {
+                        clearTimeout(timeout);
+                    },
                     onLeave() {
                         interceptor.detach();
                         blocking ? resolve(true) : setImmediate(() => resolve(false));
@@ -1323,8 +1333,8 @@ var Il2Cpp;
         const [moduleName, fallback] = getExpectedModuleNames();
         return (Process.findModuleByName(moduleName) ??
             Process.findModuleByName(fallback ?? moduleName) ??
-            (Process.platform == "darwin" ? Process.findModuleByAddress(DebugSymbol.fromName("il2cpp_init").address) : undefined)
-            ?? undefined);
+            (Process.platform == "darwin" ? Process.findModuleByAddress(DebugSymbol.fromName("il2cpp_init").address) : undefined) ??
+            undefined);
     }
     function getExpectedModuleNames() {
         if (Il2Cpp.$config.moduleName) {
@@ -1340,6 +1350,35 @@ var Il2Cpp;
         }
         raise(`${Process.platform} is not supported yet`);
     }
+})(Il2Cpp || (Il2Cpp = {}));
+var Il2Cpp;
+(function (Il2Cpp) {
+    function nullable(valueOrNull, klass) {
+        const actualClass = typeof valueOrNull == "boolean"
+            ? Il2Cpp.corlib.class("System.Boolean")
+            : typeof valueOrNull == "number"
+                ? (klass ?? Il2Cpp.corlib.class("System.Int32"))
+                : valueOrNull instanceof Int64
+                    ? Il2Cpp.corlib.class("System.Int64")
+                    : valueOrNull instanceof UInt64
+                        ? Il2Cpp.corlib.class("System.UInt64")
+                        : valueOrNull instanceof NativePointer
+                            ? (klass ?? Il2Cpp.corlib.class("System.IntPtr"))
+                            : valueOrNull instanceof Il2Cpp.ValueType
+                                ? valueOrNull.type.class
+                                : (klass ?? raise(`A class must be specified when constructing a nullable for value '${valueOrNull}'`));
+        if (actualClass.isValueType == false) {
+            raise(`Cannot create nullable value type out of a reference type '${actualClass.type.name}'`);
+        }
+        const inflatedClass = Il2Cpp.corlib.class("System.Nullable`1").inflate(actualClass);
+        const struct = new Il2Cpp.ValueType(Memory.alloc(inflatedClass.valueTypeSize), inflatedClass.type);
+        (struct.tryField("hasValue") ?? struct.field("has_value")).value = valueOrNull != null;
+        if (valueOrNull != null) {
+            struct.field("value").value = valueOrNull;
+        }
+        return struct;
+    }
+    Il2Cpp.nullable = nullable;
 })(Il2Cpp || (Il2Cpp = {}));
 var Il2Cpp;
 (function (Il2Cpp) {
@@ -1680,10 +1719,12 @@ var Il2Cpp;
             // We previosly obtained an array whose content is known by calling
             // 'System.String::Split(NULL)' on a known string. However, that
             // method invocation somehow blows things up in Unity 2018.3.0f1.
-            const array = Il2Cpp.string("v").object.method("ToCharArray", 0).invoke();
+            //
+            // See https://github.com/vfsfitvnm/frida-il2cpp-bridge/pull/717
+            const array = Il2Cpp.string("vfsfitvnm").object.method("ToCharArray", 0).invoke();
             // prettier-ignore
-            const offset = array.handle.offsetOf(_ => _.readS16() == 118) ??
-                raise("couldn't find the elements offset in the native array struct");
+            const offset = Memory.scanSync(array.handle, 0xff, "76 00 66 00 73 00 66 00 69 00 74 00 76 00 6e 00 6d 00")[0]?.address?.sub(array.handle)
+                ?? raise("couldn't find the elements offset in the native array struct");
             // prettier-ignore
             getter(Il2Cpp.Array.prototype, "elements", function () {
                 return new Il2Cpp.Pointer(this.handle.add(offset), this.elementType);
@@ -2569,7 +2610,7 @@ var Il2Cpp;
         }
         /** Gets the generic parameters of this generic method. */
         get generics() {
-            if (!this.isGeneric && !this.isInflated) {
+            if (!this.isGeneric) {
                 return [];
             }
             const types = this.object.method("GetGenericArguments").invoke();
@@ -3765,6 +3806,7 @@ var Il2Cpp;
 /// <reference path="./gc.ts">/>
 /// <reference path="./memory.ts">/>
 /// <reference path="./module.ts">/>
+/// <reference path="./nullable.ts">/>
 /// <reference path="./perform.ts">/>
 /// <reference path="./tracer.ts">/>
 /// <reference path="./structs/array.ts">/>
