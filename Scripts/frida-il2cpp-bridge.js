@@ -993,7 +993,7 @@ function lazy(_, propertyKey, descriptor) {
     return descriptor;
 }
 /** Scaffold class. */
-class NativeStruct {
+var NativeStruct = class NativeStruct {
     handle;
     constructor(handleOrWrapper) {
         if (handleOrWrapper instanceof NativePointer) {
