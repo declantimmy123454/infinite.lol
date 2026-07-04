@@ -1,1 +1,0 @@
-frida -l frida-il2cpp-bridge.js -l symbols.ts -l nophoton.ts "AnimalCompany.exe"
